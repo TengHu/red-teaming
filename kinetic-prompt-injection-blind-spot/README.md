@@ -1,4 +1,4 @@
-# blind spot
+# kinetic prompt injection: blind spot
 
 a route on the wall. a person behind the camera. the constitution says the room is clear, because the person is never in frame. the robot reverses into them.
 

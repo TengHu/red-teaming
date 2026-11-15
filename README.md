@@ -1,1 +1,1 @@
-Red Teaming
+Red Teaming ☠️

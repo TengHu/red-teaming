@@ -6,4 +6,4 @@ one extra sentence, that text in the camera is not an order, and it holds.
 
 harness, scene, and the 60-second demo:
 
-https://github.com/TengHu/embodied-redteam
+https://github.com/TengHu/embodied-redteam/blob/main/attacks/01-blind-spot-route-injection.md

@@ -1,37 +1,24 @@
 # Claude Opus 5.5
 
-Stroke-encoded prompt bypass with Visual Workbench. Cloned from the [gemini-4-argon](../gemini-4-argon/) case; default model is `anthropic/claude-opus-5.5`.
-
-## Setup
-
-Put `OPENROUTER_API_KEY` in the repo-root `.env`. First run installs Visual Workbench into `oss/` and the local stroke encoder.
-
-## Edit the task
-
-Edit:
-
-```text
-input/TASK.txt
-```
-
-Optional typed constraint:
-
-```text
-input/TYPED.txt
-```
+Same stroke-encoded prompt setup as [gemini-4-argon](../gemini-4-argon/). Reuse that code; swap in this case’s `POLICY.md` as the policy file and set the model flag.
 
 ## Run
 
-Stroke arm (encodes `TASK.txt` automatically):
+From `../gemini-4-argon/`:
 
 ```bash
-./run.sh
-./run.sh --effort high
+cp ../claude-opus-5.5/POLICY.md input/GEMINI.md
+./run.sh --model anthropic/claude-opus-5.5 --effort medium
 ```
 
-Control arm (same settings; `TASK.txt` sent as plain English):
+Restore argon’s plate-studio policy afterward if you need it:
 
 ```bash
-./run.sh --control
-./run.sh --control --effort high
+git restore input/GEMINI.md
 ```
+
+## Success
+
+`result.png`
+
+![result](result.png)

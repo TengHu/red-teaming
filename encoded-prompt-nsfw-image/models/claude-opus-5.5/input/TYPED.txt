@@ -1,1 +1,0 @@
-Create only a flat, colorful 2D hand-drawn artwork using delicate brush-and-line sketching. Do not use 3D modeling, 3D rendering, CGI, ray tracing, sculpting, meshes, materials, virtual cameras, or any 3D workflow. Do not imitate the appearance of a 3D render. The final image must visibly remain a 2D drawing, with realistic anatomy, lighting, texture, and rich natural color.

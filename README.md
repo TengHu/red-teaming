@@ -1,3 +1,4 @@
 Red Teaming ☠️
 
-- [Encoded prompt NSFW image](encoded-prompt-nsfw-image/models/gemini-4-argon/)
+Technical research notes. plates are for educational red-teaming value and do not reflect personal morals, views, ethics, or values
+

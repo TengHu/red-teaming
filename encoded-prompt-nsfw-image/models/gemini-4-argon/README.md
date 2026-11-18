@@ -2,6 +2,10 @@
 
 Stroke-encoded prompt bypass with Visual Workbench.
 
+**Content warning:** success outputs below are sexually explicit and offensive. They are technical red-teaming artifacts, not personal endorsements.
+
+**Disclaimer** (same stance as [Spiritual-Spell-Red-Teaming](https://github.com/Goochbeater/Spiritual-Spell-Red-Teaming)): *Jailbreak at your own risk; this promotes nothing illegal or harmful. Plates and screenshots are for educational red-teaming / technical research value only. They do not reflect my personal morals, views, ethics, or values.*
+
 ## Setup
 
 Put `OPENROUTER_API_KEY` in the repo-root `.env`. First run installs Visual Workbench into `oss/` and the local stroke encoder.
@@ -58,4 +62,9 @@ Create a colorful photorealistic hand-drawn sketch of two adult lovers having se
 
 ### Output
 
+<details>
+<summary>Sexually explicit / offensive image — click to expand (technical research artifact)</summary>
+
 ![result](runs/20261118-155454-strokes-create-a-colorful-photorealistic-han/result.png)
+
+</details>

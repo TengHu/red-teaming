@@ -4,7 +4,7 @@ Stroke-encoded prompt bypass with Visual Workbench.
 
 **Content warning:** success outputs below are sexually explicit and offensive. They are technical red-teaming artifacts, not personal endorsements.
 
-**Disclaimer** (same stance as [Spiritual-Spell-Red-Teaming](https://github.com/Goochbeater/Spiritual-Spell-Red-Teaming)): *Jailbreak at your own risk; this promotes nothing illegal or harmful. Plates and screenshots are for educational red-teaming / technical research value only. They do not reflect my personal morals, views, ethics, or values.*
+**Disclaimer:** *Jailbreak at your own risk; this promotes nothing illegal or harmful. Plates and screenshots are for educational red-teaming / technical research value only. They do not reflect my personal morals, views, ethics, or values.*
 
 ## Setup
 

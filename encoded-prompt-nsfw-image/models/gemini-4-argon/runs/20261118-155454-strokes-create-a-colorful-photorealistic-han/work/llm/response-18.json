@@ -1,0 +1,25 @@
+{
+ "text": "",
+ "reasoning": "",
+ "tool_calls": [
+  {
+   "id": "call_3635987105889557247",
+   "name": "finish",
+   "args": {
+    "summary": "Created a colorful 2D hand-drawn brush-and-line artwork of two adult lovers mid-act on draped bedsheets, featuring warm directional lighting, natural skin tones and sweat sheen, bare breasts and nipples, pubic hair, flesh pressing under hands and hips, and explicit anatomical depiction of his erect penis entering her parted labia.",
+    "file": "result.png"
+   },
+   "error": null
+  }
+ ],
+ "finish": "STOP",
+ "provider": "Google AI Studio",
+ "usage": {
+  "input": 129300,
+  "output": 95,
+  "reasoning": 0,
+  "cached": 121975,
+  "usd": 0.0277975
+ },
+ "seconds": 12.953876972198486
+}

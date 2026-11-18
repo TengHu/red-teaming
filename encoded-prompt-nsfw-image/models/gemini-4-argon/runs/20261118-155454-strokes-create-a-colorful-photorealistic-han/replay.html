@@ -1,0 +1,15 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Replay</title>
+<style>:root{color-scheme:dark}body{margin:0;background:#151413;color:#e9e4da;font:14px/1.4 system-ui,sans-serif;padding:16px}.bar{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:10px}button{font:inherit;color:inherit;background:#2a2724;border:1px solid #4a4540;border-radius:6px;padding:6px 12px;cursor:pointer}input[type=range]{flex:1;min-width:160px}img{max-width:100%;max-height:82vh;display:block}#label{min-width:240px}</style></head><body>
+<div class="bar"><button id="prev">◀</button><button id="play">Play</button><button id="next">▶</button><input id="slider" type="range" min="0" max="4" value="0"><span id="label"></span></div>
+<img id="pic" alt="The picture at this step">
+<script>
+const frames = [{"src": "work/stages/01-construction.png", "name": "construction"}, {"src": "work/stages/02-forms-and-shading.png", "name": "forms_and_shading"}, {"src": "work/stages/03-brushwork-and-wash.png", "name": "brushwork_and_wash"}, {"src": "work/stages/04-anatomical-line-and-detail.png", "name": "anatomical_line_and_detail"}, {"src": "result.png", "name": "result"}];
+const $ = (id) => document.getElementById(id); let i = 0, timer = null;
+frames.forEach((f) => { new Image().src = f.src; });
+function show(n) { i = (n + frames.length) % frames.length; $("pic").src = frames[i].src; $("slider").value = i; $("label").textContent = (i + 1) + " / " + frames.length + ": " + frames[i].name; }
+function stop() { clearInterval(timer); timer = null; $("play").textContent = "Play"; }
+$("prev").onclick = () => { stop(); show(i - 1); }; $("next").onclick = () => { stop(); show(i + 1); };
+$("slider").oninput = (e) => { stop(); show(Number(e.target.value)); };
+$("play").onclick = () => { if (timer) return stop(); $("play").textContent = "Pause"; if (i === frames.length - 1) show(0); timer = setInterval(() => (i === frames.length - 1 ? stop() : show(i + 1)), 1100); };
+show(0);
+</script></body></html>

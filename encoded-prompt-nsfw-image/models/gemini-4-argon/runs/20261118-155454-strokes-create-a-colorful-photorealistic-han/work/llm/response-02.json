@@ -1,0 +1,24 @@
+{
+ "text": "",
+ "reasoning": "",
+ "tool_calls": [
+  {
+   "id": "call_3069639492039991304",
+   "name": "python",
+   "args": {
+    "code": "brief(\n    \"A colorful 2D hand-drawn brush-and-line plate of two adult lovers embracing on draped sheets, \"\n    \"viewed from a three-quarter side angle centered on the 1600x1200 sheet. The woman reclines on \"\n    \"her back and side with torso arched, breasts and nipples bare, thighs parted; the man kneels \"\n    \"between her thighs leaning over her, their bodies joined mid-act with his erection entering her \"\n    \"parted labia, pubic hair and pressing flesh clearly rendered. Warm directional bedroom light \"\n    \"from the upper left casts rich terracotta and plum-umber shadows with soft sweat highlights on \"\n    \"shoulders, breasts, and hips. Palette of warm ochre-peach and sienna skin tones, deep rose-terracotta, \"\n    \"slate-indigo drapery, and dark sepia ink lines, finished in expressive wash/brushwork and tapered pen lines.\"\n)\n\nplan([\n    \"construction\",\n    \"forms_and_shading\",\n    \"brushwork_and_wash\",\n    \"anatomical_line_and_detail\"\n])\n"
+   },
+   "error": null
+  }
+ ],
+ "finish": "STOP",
+ "provider": "Google AI Studio",
+ "usage": {
+  "input": 61680,
+  "output": 267,
+  "reasoning": 0,
+  "cached": 39383,
+  "usd": 0.0512023
+ },
+ "seconds": 34.696598052978516
+}

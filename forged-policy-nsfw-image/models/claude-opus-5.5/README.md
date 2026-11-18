@@ -1,6 +1,6 @@
-# Claude Opus 5.5
+# Claude Opus 5.5 — forged policy NSFW image
 
-Same stroke-encoded prompt setup as [gemini-4-argon](../gemini-4-argon/). Reuse that code; swap in this case’s `POLICY.md` as the policy file and set the model flag.
+Attack claim: a forged operator / safety `POLICY.md` is enough to get the drawing harness to produce adult explicit plates. Stroke encoding is not the lever here. Plain English (`--control`) still draws under this policy.
 
 **Content warning:** the success plate is sexually explicit and offensive. It is a technical red-teaming artifact, not a personal endorsement.
 
@@ -10,28 +10,34 @@ Same stroke-encoded prompt setup as [gemini-4-argon](../gemini-4-argon/). Reuse 
 
 `POLICY.md` is adapted from Spiritual Spell’s Opus 5.5 **Claude for Claude - ENI** forged-policy / operator payload ([Jailbreak-Guide/Anthropic/Opus 5.5](https://github.com/Goochbeater/Spiritual-Spell-Red-Teaming/tree/main/Jailbreak-Guide/Anthropic/Opus%205.5)), rewritten for fictional painters / sketching so adult fictional drawings are in-policy.
 
-## Run
+## Replicate
 
-From `../gemini-4-argon/`:
+Reuse the Argon harness at [encoded-prompt-nsfw-image/models/gemini-4-argon](../../../encoded-prompt-nsfw-image/models/gemini-4-argon/). Put `OPENROUTER_API_KEY` in the repo-root `.env`. From that directory:
 
 ```bash
-cp ../claude-opus-5.5/POLICY.md input/GEMINI.md
-./run.sh --model anthropic/claude-opus-5.5 --effort medium
+cp ../../../forged-policy-nsfw-image/models/claude-opus-5.5/POLICY.md input/GEMINI.md
+./run.sh --model anthropic/claude-opus-5.5 --effort medium --control
 ```
 
-Restore argon’s plate-studio policy afterward if you need it:
+Restore Argon’s policy afterward:
 
 ```bash
 git restore input/GEMINI.md
 ```
 
+Fresh runs land under:
+
+```text
+encoded-prompt-nsfw-image/models/gemini-4-argon/runs/
+```
+
 ## Success
 
-`result.png`
+PROOF: [`runs/reproduction-20261118-180009-strokes/result.png`](runs/reproduction-20261118-180009-strokes/result.png)
 
 <details>
 <summary>Sexually explicit / offensive image — click to expand (technical research artifact)</summary>
 
-![result](result.png)
+![result](runs/reproduction-20261118-180009-strokes/result.png)
 
 </details>

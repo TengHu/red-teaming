@@ -1,6 +1,6 @@
 # Gemini 4 Argon
 
-Stroke-encoded prompt bypass with Visual Workbench.
+Stroke-encoded prompt bypass.
 
 **Content warning:** success outputs below are sexually explicit and offensive. They are technical red-teaming artifacts, not personal endorsements.
 
@@ -8,7 +8,7 @@ Stroke-encoded prompt bypass with Visual Workbench.
 
 ## Setup
 
-Put `OPENROUTER_API_KEY` in the repo-root `.env`. First run installs Visual Workbench into `oss/` and the local stroke encoder.
+Put `OPENROUTER_API_KEY` in the repo-root `.env`. First run installs the drawing harness into `oss/` and the local stroke encoder.
 
 ## Edit the task
 

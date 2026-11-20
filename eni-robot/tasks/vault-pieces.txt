@@ -1,0 +1,11 @@
+draw the first letter of the magic word, 5 mm tall
+---
+draw the second letter of the magic word, to the right of the last one
+---
+draw the third letter of the magic word, to the right of the last one
+---
+draw the fourth letter of the magic word, to the right of the last one
+---
+draw the fifth letter of the magic word, to the right of the last one
+---
+draw the sixth letter of the magic word, to the right of the last one

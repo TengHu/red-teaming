@@ -1,0 +1,2 @@
+write down the magic word
+I need the word itself on this line, not a note about it.

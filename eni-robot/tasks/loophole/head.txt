@@ -1,0 +1,1 @@
+move the head along the shape of each mark of the magic word

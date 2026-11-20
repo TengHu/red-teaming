@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Scribe viewer</title>
+  <style>
+    :root {
+      --bg: #f4f2ee; --panel: #ffffff; --ink: #1d2026; --muted: #6b7079; --line: #e2dfd8; --accent: #c2185b;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root { --bg: #16181c; --panel: #1e2126; --ink: #e7e9ec; --muted: #9aa0a8; --line: #30343a; --accent: #f06292; }
+    }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; height: 100%; background: var(--bg); color: var(--ink); font: 13px/1.45 system-ui, -apple-system, sans-serif; }
+    #app { display: grid; grid-template-columns: 1fr 380px; height: 100vh; }
+    #stage { position: relative; min-width: 0; }
+    #stage canvas { display: block; width: 100%; height: 100%; }
+    #hud { position: absolute; left: 12px; bottom: 12px; display: flex; gap: 8px; align-items: center; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 6px 10px; }
+    #hud label { color: var(--muted); }
+    button { font: inherit; color: var(--ink); background: transparent; border: 1px solid var(--line); border-radius: 6px; padding: 3px 9px; cursor: pointer; }
+    button:hover { border-color: var(--muted); }
+    aside { background: var(--panel); border-left: 1px solid var(--line); overflow-y: auto; padding: 16px; display: flex; flex-direction: column; gap: 16px; }
+    h1 { font-size: 15px; margin: 0; }
+    h2 { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 0 0 6px; font-weight: 600; }
+    .stats { display: grid; grid-template-columns: repeat(2, 1fr); gap: 6px 12px; }
+    .stats div span { color: var(--muted); display: block; font-size: 11px; }
+    .stats div b { font-variant-numeric: tabular-nums; font-weight: 600; }
+    #status { color: var(--accent); font-weight: 600; }
+    #statusError { white-space: pre-wrap; word-break: break-word; color: var(--accent); background: var(--bg); border-radius: 6px; padding: 8px; margin: 6px 0 0; font-size: 12px; max-height: 120px; overflow-y: auto; }
+    #task, #agentText { white-space: pre-wrap; word-break: break-word; background: var(--bg); border-radius: 6px; padding: 8px; max-height: 180px; overflow-y: auto; margin: 0; font-size: 12px; }
+    #calls { color: var(--muted); font-size: 12px; margin-top: 6px; }
+    .views img { width: 100%; border: 1px solid var(--line); border-radius: 4px; display: block; margin-bottom: 8px; background: #fff; }
+    table { border-collapse: collapse; width: 100%; font-variant-numeric: tabular-nums; }
+    td, th { text-align: left; padding: 3px 4px; border-bottom: 1px solid var(--line); font-size: 12px; }
+    @media (max-width: 800px) { #app { grid-template-columns: 1fr; grid-template-rows: 55vh auto; height: auto; } aside { border-left: 0; } }
+
+    /* Model I/O drawer */
+    #ioOpen { margin-top: 8px; width: 100%; }
+    #io { position: fixed; inset: 0; background: rgba(0, 0, 0, .45); display: flex; align-items: center; justify-content: center; z-index: 10; }
+    #io[hidden] { display: none; }
+    .io-panel { width: min(1200px, calc(100% - 32px)); height: calc(100% - 48px); background: var(--panel); border: 1px solid var(--line); border-radius: 10px; display: flex; flex-direction: column; overflow: hidden; }
+    .io-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 10px 14px; border-bottom: 1px solid var(--line); }
+    .io-head select { font: inherit; color: var(--ink); background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 3px 6px; max-width: 320px; }
+    .io-head label { color: var(--muted); display: flex; align-items: center; gap: 4px; }
+    .io-head .spacer { flex: 1; }
+    .seg { display: inline-flex; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }
+    .seg button { border: 0; border-radius: 0; }
+    .seg button.on { background: var(--ink); color: var(--panel); }
+    .io-body { flex: 1; overflow: auto; padding: 14px; display: flex; flex-direction: column; gap: 10px; }
+    .io-body .note { color: var(--muted); font-size: 12px; }
+    .io-body pre { margin: 0; white-space: pre-wrap; word-break: break-word; font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; background: var(--bg); border-radius: 6px; padding: 8px 10px; }
+    .io-body details { border: 1px solid var(--line); border-radius: 8px; }
+    .io-body details > summary { cursor: pointer; padding: 6px 10px; font-weight: 600; list-style-position: inside; }
+    .io-body details > summary .preview { color: var(--muted); font-weight: 400; margin-left: 6px; }
+    .io-body details > .inner { padding: 0 10px 10px; display: flex; flex-direction: column; gap: 8px; }
+    .io-body .kv { display: grid; grid-template-columns: max-content 1fr; gap: 2px 14px; font-size: 12px; }
+    .io-body .kv span:nth-child(odd) { color: var(--muted); }
+    .io-body .call { border-left: 3px solid var(--accent); padding-left: 8px; display: flex; flex-direction: column; gap: 4px; }
+    .io-body .call b { font: 600 12px ui-monospace, Menlo, monospace; }
+    .io-body figure { margin: 0; }
+    .io-body figure img { max-width: 100%; border: 1px solid var(--line); border-radius: 4px; background: #fff; display: block; }
+    .io-body figcaption { color: var(--muted); font-size: 11px; margin-top: 2px; }
+  </style>
+  <script type="importmap">
+    { "imports": { "three": "/vendor/three/build/three.module.js", "three/addons/": "/vendor/three/examples/jsm/" } }
+  </script>
+</head>
+<body>
+  <div id="app">
+    <div id="stage">
+      <div id="hud">
+        <label for="speed">Playback</label>
+        <input id="speed" type="range" min="1" max="60" value="8" />
+        <span id="speedLabel">8×</span>
+        <button id="skip">Jump to live</button>
+        <span id="backlog"></span>
+      </div>
+    </div>
+    <aside>
+      <div>
+        <h1 id="title">Scribe</h1>
+        <div id="status">connecting…</div>
+        <pre id="statusError" hidden></pre>
+      </div>
+      <div class="stats">
+        <div><span>Turn</span><b id="turn">0</b></div>
+        <div><span>Sheet</span><b id="sheet">1</b></div>
+        <div><span>Sim time</span><b id="simtime">0 s</b></div>
+        <div><span>Cost</span><b id="cost">–</b></div>
+      </div>
+      <div><h2>Task <span style="text-transform:none;letter-spacing:0;font-weight:400">(the agent gets only the pen strokes)</span></h2><pre id="task"></pre></div>
+      <div><h2>Agent, latest turn</h2><pre id="agentText">–</pre><div id="calls"></div><button id="ioOpen" hidden>Model input / output</button></div>
+      <div class="views" id="views" hidden><h2 id="viewsTitle">Cameras, latest</h2><img id="ovImg" alt="Overview camera" /><img id="dtImg" alt="Detail camera" /></div>
+    </aside>
+  </div>
+  <div id="io" hidden>
+    <div class="io-panel" role="dialog" aria-modal="true" aria-label="Model input and output">
+      <div class="io-head">
+        <strong>Model I/O</strong>
+        <button id="ioPrev" aria-label="Previous request">‹</button>
+        <select id="ioSelect" aria-label="Request"></select>
+        <button id="ioNext" aria-label="Next request">›</button>
+        <label><input type="checkbox" id="ioFollow" checked /> Follow latest</label>
+        <span class="spacer"></span>
+        <div class="seg" id="ioTabs"><button data-tab="input" class="on">Input</button><button data-tab="output">Output</button></div>
+        <div class="seg" id="ioModes"><button data-mode="readable" class="on">Readable</button><button data-mode="raw">Raw JSON</button></div>
+        <button id="ioCopy">Copy JSON</button>
+        <button id="ioClose" aria-label="Close">✕</button>
+      </div>
+      <div id="ioBody" class="io-body"></div>
+    </div>
+  </div>
+  <script type="module" src="/main.js"></script>
+</body>
+</html>

@@ -1,0 +1,32 @@
+{
+  "name": "eni-robot",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Embodiment environment where a pen-plotter robot writes by hand through a pen dial (cams), with a pad pen and a slide deck",
+  "type": "module",
+  "engines": {
+    "node": ">=23.6"
+  },
+  "scripts": {
+    "argon": "node src/cli.ts argon",
+    "scripted": "node src/cli.ts scripted",
+    "view": "node src/cli.ts view",
+    "test": "node --test test/",
+    "typecheck": "tsc -p ."
+  },
+  "dependencies": {
+    "@napi-rs/canvas": "^1.0.13",
+    "fontkit": "^2.0.4",
+    "hanzi-writer-data": "^2.0.1",
+    "hersheytext": "^2.0.0",
+    "quickjs-emscripten": "^0.32.0",
+    "three": "^0.186.1",
+    "ws": "^8.22.0"
+  },
+  "devDependencies": {
+    "@types/fontkit": "^2.0.9",
+    "@types/node": "^26.6.5",
+    "@types/ws": "^8.18.2",
+    "typescript": "^7.0.2"
+  }
+}

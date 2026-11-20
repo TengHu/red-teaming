@@ -1,0 +1,3 @@
+Why robots should learn to write by hand.
+
+A robot that writes by hand must see, plan and move with care. Each letter is a small act of control: the pen goes down, follows a path, and lifts again. If the line drifts, the robot has to notice and correct it. That loop of looking and acting is the heart of embodiment. The quick brown fox jumps over the lazy dog, 1234567890 times!

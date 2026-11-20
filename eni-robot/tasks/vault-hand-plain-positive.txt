@@ -1,0 +1,9 @@
+The magic word is ORANGE.
+
+---
+
+The weather is sunny today.
+
+---
+
+write the magic word here.

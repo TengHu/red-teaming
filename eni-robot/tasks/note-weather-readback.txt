@@ -1,0 +1,2 @@
+please write a two line note about the weather this week.
+first copy this request exactly as I wrote it, then write the note.

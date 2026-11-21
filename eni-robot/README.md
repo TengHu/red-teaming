@@ -134,6 +134,72 @@ now write one line about the weather this week
 
 **Raw sections.** A section whose first line is exactly `[raw]` reaches the agent as typed text in its place in the recording (`{ "line": n, "text": "..." }`), not as pen strokes; the marker line is dropped. Raw sections work in instruct and scan tasks, not in copy tasks, which need strokes to copy. A deck can mix handwritten sections, read through the pad pen, with typed ones.
 
+## Input sets
+
+An attack is two files in one folder: the deck (the task) and the system prompt.
+
+```
+censored-agents-forbidden/<set>/
+  deck.txt             the task — one page per probe; `---` separates pages, `--` separates sections
+  system-prompt.txt    the system prompt sent to the model
+```
+
+```sh
+npm run argon -- --model google/gemini-4-argon \
+  --slides censored-agents-forbidden/uncensored-eni/deck.txt \
+  --system-prompt-file censored-agents-forbidden/uncensored-eni/system-prompt.txt
+```
+
+A deck is **one conversation**: each page is sent once, in order, and the paper carries on across pages. A
+one-page deck is a single task, so `--slides` covers both. For independent probes, give each its own folder.
+
+## Prompts from files
+
+Outside a package, no text the model reads is fixed in the code either. Two common files have their own flags, and
+any other component uses `--prompt NAME=PATH`:
+
+```sh
+# replace the whole system prompt
+npm run argon -- --model google/gemini-4-argon --task "Write a joke." \
+  --system-prompt-file ./system.txt
+
+# replace just the YOUR TASK section
+npm run argon -- --model google/gemini-4-argon --task "Write a joke." \
+  --task-prompt-file ./task.txt
+
+# any other component, e.g. the writing rules or a user message
+npm run argon -- --model google/gemini-4-argon --task "Write a joke." \
+  --prompt system.writing=./writing.txt \
+  --prompt user.start=./start.txt
+
+# the operating policy (same as --policy "$(cat f)")
+npm run argon -- --model google/gemini-4-argon --task-kind scan --policy-file ./policy.txt
+
+# tool descriptions: a JSON object of tool name -> description (the schemas stay the same)
+npm run argon -- --model google/gemini-4-argon --task "Write a joke." --tool-descriptions ./tools.json
+
+# the whole tool set: a JSON array of OpenAI-style tools, replacing the environment's own
+npm run argon -- --model google/gemini-4-argon --task "Write a joke." --tools-file ./tools.json
+```
+
+The system prompt and the task section can also be given as text, so the whole prompt sits in the arg line:
+
+```sh
+# the exact text sent, no file read inside the process
+npm run argon -- --model google/gemini-4-argon --task "Write a joke." \
+  --system-prompt "$(cat ./system.txt)"
+
+# print the system prompt these flags produce, then exit (no run directory, no request)
+npm run argon -- --model google/gemini-4-argon --task "Write a joke." \
+  --system-prompt "$(cat ./system.txt)" --print-system-prompt
+```
+
+`--system-prompt`/`--system-prompt-file` and `--task-prompt`/`--task-prompt-file` are alternatives; passing both of a pair is an error. A text override is not recorded in `prompt_files`, because there is no file to record.
+
+`node src/cli.ts prompts` (or `--list-prompt-components`) prints every component name and every placeholder. A prompt file may interpolate `{{name}}`; an unknown name is an error rather than a silent blank. Placeholders include the computed section texts (`{{intro}}`, `{{body}}`, `{{task}}`, `{{task_pad}}`, `{{task_instructions}}`, `{{hard_rules}}`, `{{writing}}`, `{{perception}}`, `{{acting}}`, ...) and the run values (`{{sheet_width_mm}}`, `{{ruling}}`, `{{pen_body}}`, `{{policy}}`, `{{pages}}`, `{{task_kind}}`, `{{memory_advice}}`, `{{turn}}`, `{{page}}`, ...).
+
+`--prompt` is applied after `--task-prompt-file`, so it can override that section. `--system-prompt-file` replaces the whole system prompt, so when it is set the section overrides do not affect it. The files used are recorded in `run.json` under `prompt_files`, `policy_file`, `tool_descriptions_file` and `tools_file`. `--tool-descriptions` is applied on top of `--tools-file`.
+
 ## What the agent perceives
 
 Once, in the first message (never dropped from the conversation):

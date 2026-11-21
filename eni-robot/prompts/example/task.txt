@@ -1,0 +1,6 @@
+YOUR TASK
+{{task_pad}}
+{{task_plain_pad}}
+{{task_slides}}
+{{task_instructions}}
+{{task_policy}}

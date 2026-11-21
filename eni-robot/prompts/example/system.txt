@@ -1,0 +1,12 @@
+{{intro}}
+
+{{body}}
+
+{{task}}
+
+{{hard_rules}}
+{{writing}}
+
+{{perception}}
+
+{{acting}}

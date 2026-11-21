@@ -1,6 +1,21 @@
 import type { CallResult, Observation, ScribeEnv, ToolCall } from "../env.ts";
 import { isBlocked, type AttemptLog, type ChatClient, type ChatMessage, type ChatResponse, type ContentPart, type ToolCallMsg } from "../clients/index.ts";
-import { BLOCKED_MESSAGE, BLOCKED_SHORTER_MESSAGE, droppedTurnsMessage, pageTurnHeader, RECORDING_HEADER, startMessage, systemPrompt, TASK_IMAGE_HEADER } from "../prompt.ts";
+import {
+  blockedMessage,
+  blockedShorterMessage,
+  droppedTurnsMessage,
+  imageLabel,
+  imageOmittedLabel,
+  noToolCallsMessage,
+  observationPrefix,
+  pageTurnHeader,
+  recordingHeader,
+  startMessage,
+  systemPrompt,
+  taskImageHeader,
+  type PromptOverrides,
+} from "../prompt.ts";
+import { applyToolDescriptions, type ToolSchema } from "../actions.ts";
 import { renderPad } from "../taskpad.ts";
 
 /**
@@ -52,6 +67,12 @@ export interface ArgonOptions {
   afterStep?: () => Promise<void>;
   /** Slides: the operator's page turns. take() uses up one queued turn; wait() resolves once one is queued. */
   pageTurns?: PageTurns;
+  /** Prompt components loaded from files; each replaces the default text sent to the model. */
+  prompts?: PromptOverrides;
+  /** Tool descriptions loaded from a file: tool name -> description. The schemas stay as they are. */
+  toolDescriptions?: Record<string, string> | null;
+  /** A complete tool set loaded from a file; replaces the environment's own. */
+  tools?: ToolSchema[];
 }
 
 export interface PageTurns {
@@ -122,13 +143,15 @@ export async function runArgon(env: ScribeEnv, client: ChatClient, opts: ArgonOp
   if (!env.taskPad) throw new Error("runArgon needs an environment with a task pad (ScribeEnv.create(cfg, { task }))");
   const maxContextTokens = opts.maxContextTokens ?? DEFAULT_MAX_CONTEXT_TOKENS;
   const taskImage = env.imagePad !== null;
-  const system: ChatMessage = { role: "system", content: systemPrompt(env.cfg, { keepTurns: opts.keepTurns, maxContextTokens }, taskImage, Math.max(1, env.pages.length)) };
+  const prompts = opts.prompts ?? {};
+  const tools = applyToolDescriptions(opts.tools ?? env.tools(), opts.toolDescriptions);
+  const system: ChatMessage = { role: "system", content: systemPrompt(env.cfg, { keepTurns: opts.keepTurns, maxContextTokens }, taskImage, Math.max(1, env.pages.length), prompts) };
   const pinned: ContentPart[] = [
-    { type: "text", text: startMessage(env.cfg, taskImage) },
-    { type: "text", text: `${RECORDING_HEADER}\n${JSON.stringify(env.taskRecording())}` },
+    { type: "text", text: startMessage(env.cfg, taskImage, prompts) },
+    { type: "text", text: `${recordingHeader(prompts)}\n${JSON.stringify(env.taskRecording())}` },
   ];
   if (env.imagePad) {
-    pinned.push({ type: "text", text: TASK_IMAGE_HEADER });
+    pinned.push({ type: "text", text: taskImageHeader(prompts) });
     pinned.push({ type: "image_url", image_url: { url: `data:image/png;base64,${renderPad(env.imagePad).toString("base64")}` } });
   }
   // Number-only tools are only a guarantee when the reply cannot be free text: the backend's function-calling mode ANY.
@@ -141,7 +164,7 @@ export async function runArgon(env: ScribeEnv, client: ChatClient, opts: ArgonOp
   let idle = 0;
   let requests = 0;
   let blocked = 0;
-  let blockedNote = BLOCKED_MESSAGE;
+  let blockedNote = blockedMessage(prompts);
 
   const buildMessages = (): ChatMessage[] => {
     const start = Math.max(firstKept, opts.keepTurns > 0 ? history.length - opts.keepTurns : 0);
@@ -150,14 +173,14 @@ export async function runArgon(env: ScribeEnv, client: ChatClient, opts: ArgonOp
     const latestObs = [...kept].reverse().find((t) => t.obs)?.obs ?? initialObs;
     const msgs: ChatMessage[] = [system];
     if (dropped === 0) {
-      msgs.push({ role: "user", content: [...pinned, ...obsParts(env, initialObs, 0, initialObs === latestObs)] });
+      msgs.push({ role: "user", content: [...pinned, ...obsParts(env, initialObs, 0, initialObs === latestObs, prompts)] });
     } else {
-      msgs.push({ role: "user", content: [...pinned, { type: "text", text: droppedTurnsMessage(dropped) }] });
+      msgs.push({ role: "user", content: [...pinned, { type: "text", text: droppedTurnsMessage(dropped, prompts) }] });
     }
     for (const t of kept) {
       if (t.assistant) msgs.push(t.assistant);
       msgs.push(...t.replies);
-      if (t.obs) msgs.push({ role: "user", content: obsParts(env, t.obs, t.obsTurn, t.obs === latestObs) });
+      if (t.obs) msgs.push({ role: "user", content: obsParts(env, t.obs, t.obsTurn, t.obs === latestObs, prompts) });
     }
     return msgs;
   };
@@ -169,7 +192,7 @@ export async function runArgon(env: ScribeEnv, client: ChatClient, opts: ArgonOp
     if (opts.pageTurns && blocked === 0) {
       if (env.waitingForPage) await opts.pageTurns.wait();
       if (opts.pageTurns.take() && env.turnPage()) {
-        const text = `${pageTurnHeader(env.page + 1, env.pages.length)}\n${JSON.stringify(env.taskRecording())}`;
+        const text = `${pageTurnHeader(env.page + 1, env.pages.length, prompts)}\n${JSON.stringify(env.taskRecording())}`;
         history.push({ replies: [{ role: "user", content: [{ type: "text", text }] }], obs: null, obsTurn: env.turn, page: true });
       }
     }
@@ -178,7 +201,7 @@ export async function runArgon(env: ScribeEnv, client: ChatClient, opts: ArgonOp
     const body = {
       model: opts.model,
       messages: blocked > 0 ? [...buildMessages(), { role: "user", content: blockedNote } as ChatMessage] : buildMessages(),
-      tools: env.tools(),
+      tools,
       tool_choice: toolChoice,
       reasoning: { effort: opts.reasoningEffort ?? "low" },
       max_tokens: opts.maxTokens,
@@ -196,7 +219,7 @@ export async function runArgon(env: ScribeEnv, client: ChatClient, opts: ArgonOp
       // line of the answer (instruct tasks).
       if (isBlocked(error) && blocked < MAX_BLOCKED_RESENDS) {
         blocked++;
-        blockedNote = env.narrowTaskLine() || env.cfg.taskKind === "copy" ? BLOCKED_MESSAGE : BLOCKED_SHORTER_MESSAGE;
+        blockedNote = env.narrowTaskLine() || env.cfg.taskKind === "copy" ? blockedMessage(prompts) : blockedShorterMessage(prompts);
         // Back off exponentially, so the resends span the minutes-to-hours the upstream blocks last
         // (measured 2026-11-03: a storm outlasted 12 fixed 10 s resends; jitter keeps parallel runs unsynchronized).
         const pause = Math.min(300_000, (opts.blockPauseMs ?? DEFAULT_BLOCK_PAUSE_MS) * 2 ** (blocked - 1));
@@ -248,7 +271,7 @@ export async function runArgon(env: ScribeEnv, client: ChatClient, opts: ArgonOp
       idle++;
       history.push({
         assistant,
-        replies: [{ role: "user", content: "You made no tool calls. Continue by calling tools. When the observation says the task is complete, call done()." }],
+        replies: [{ role: "user", content: noToolCallsMessage(prompts) }],
         obs: null,
         obsTurn: env.turn,
       });
@@ -306,7 +329,7 @@ export async function runArgon(env: ScribeEnv, client: ChatClient, opts: ArgonOp
  * One observation as message parts. Only the latest carries the images and the glyph library, and its task line
  * is taken fresh from the environment, so a line narrowed after a block goes out as it now is.
  */
-function obsParts(env: ScribeEnv, obs: Observation, turn: number, latest: boolean): ContentPart[] {
+function obsParts(env: ScribeEnv, obs: Observation, turn: number, latest: boolean, prompts: PromptOverrides = {}): ContentPart[] {
   let json = obs.json;
   if ("task_line" in json && latest) json = { ...json, task_line: env.taskLine() };
   if ("page" in json && latest) json = { ...json, page: env.pageInfo() };
@@ -315,13 +338,13 @@ function obsParts(env: ScribeEnv, obs: Observation, turn: number, latest: boolea
     json = { ...json, page_strokes: `${rec.lines.reduce((a, l) => a + l.stroke_count, 0)} strokes ${OMITTED}` };
   }
   if ("glyph_library" in json && !latest) json = { ...json, glyph_library: `${(json.glyph_library as unknown[]).length} glyphs ${OMITTED}` };
-  const parts: ContentPart[] = [{ type: "text", text: `Observation after turn ${turn}:\n${JSON.stringify(json)}` }];
+  const parts: ContentPart[] = [{ type: "text", text: `${observationPrefix(turn, prompts)}${JSON.stringify(json)}` }];
   for (const img of obs.images) {
     if (latest) {
-      parts.push({ type: "text", text: `${img.name} image:` });
+      parts.push({ type: "text", text: imageLabel(img.name, prompts) });
       parts.push({ type: "image_url", image_url: { url: `data:image/png;base64,${img.png.toString("base64")}` } });
     } else {
-      parts.push({ type: "text", text: `[${img.name} image omitted from older observation]` });
+      parts.push({ type: "text", text: imageOmittedLabel(img.name, prompts) });
     }
   }
   return parts;

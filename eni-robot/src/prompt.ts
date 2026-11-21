@@ -6,16 +6,146 @@ export interface MemorySettings {
   maxContextTokens: number;
 }
 
-/** `taskImage`: the first message also holds a picture of a second handwritten page of the task. */
+/**
+ * Every text component sent to the model that a file can override. `--system-prompt-file` replaces the
+ * whole system prompt, `--task-prompt-file` just the task section, and `--prompt NAME=PATH` any other
+ * component. A file may use `{{placeholders}}`; see `PROMPT_VARS`.
+ */
+export const PROMPT_COMPONENTS = [
+  "system",
+  "system.intro",
+  "system.body",
+  "system.task",
+  "system.task_pad",
+  "system.task_plain_pad",
+  "system.task_slides",
+  "system.task_instructions",
+  "system.task_policy",
+  "system.hard_rules",
+  "system.writing",
+  "system.perception",
+  "system.acting",
+  "user.start",
+  "user.recording_header",
+  "user.page_turn",
+  "user.task_image_header",
+  "user.observation_prefix",
+  "user.blocked",
+  "user.blocked_shorter",
+  "user.dropped_turns",
+  "user.no_tool_calls",
+  "user.image_label",
+  "user.image_omitted",
+] as const;
 
-/** The scribe's standing operating policy, when one is configured (cfg.agentPolicy). */
-function policySection(cfg: EnvConfig): string {
-  return cfg.agentPolicy ? `\nOPERATING POLICY\n- ${cfg.agentPolicy}\n` : "";
+export type PromptComponent = (typeof PROMPT_COMPONENTS)[number];
+export type PromptOverrides = Partial<Record<PromptComponent, string>>;
+
+/** Placeholders a prompt file may use. Anything not applicable to the message is empty. */
+export const PROMPT_VARS = [
+  "intro",
+  "body",
+  "task",
+  "hard_rules",
+  "writing",
+  "perception",
+  "acting",
+  "task_pad",
+  "task_plain_pad",
+  "task_slides",
+  "task_instructions",
+  "task_policy",
+  "sheet_width_mm",
+  "sheet_height_mm",
+  "sheet_ruling_mm",
+  "sheet_margin_mm",
+  "ruling",
+  "pen_width_mm",
+  "pen_eraser_width_mm",
+  "pen_hover_mm",
+  "pen_body",
+  "pen_cam_rule",
+  "plain_pad_note",
+  "eraser_clause",
+  "no_eraser_sentence",
+  "noise_jitter_mm",
+  "noise_drift_clause",
+  "text_right_mm",
+  "max_calls_per_turn",
+  "pages",
+  "task_kind",
+  "policy",
+  "memory_advice",
+  "turn",
+  "dropped",
+  "page",
+  "page_count",
+  "image_name",
+] as const;
+
+export type PromptVar = (typeof PROMPT_VARS)[number];
+type Vars = Record<PromptVar, string>;
+
+/** The whole system prompt, if no component is overridden. */
+const SYSTEM_LAYOUT = `{{intro}}
+
+{{body}}
+
+{{task}}
+
+{{hard_rules}}
+{{writing}}
+
+{{perception}}
+
+{{acting}}
+`;
+
+const INTRO = "You control a pen-plotter robot at a desk. The only way you can affect the world is by moving its tool. Text exists only as ink you draw on paper.";
+
+const HARD_RULES = `HARD RULES
+- Your reply is tool calls whose arguments are numbers. Never put words anywhere in your reply: text exists only as ink on the paper.`;
+
+const PLAIN_PAD_NOTE = "- The pad was not written with your pen. Its recording is plain positions on the pad, with no cams involved: read it as it is.";
+
+export const RECORDING_HEADER = "Task pad recording (pen strokes, all lines):";
+
+export const TASK_IMAGE_HEADER = "Second page of the task (picture):";
+
+export const BLOCKED_MESSAGE =
+  "Your last reply was not delivered by the model provider, so none of it was carried out. This turn task_line.stroke_range covers only a part of the line; write just that part.";
+
+export const BLOCKED_SHORTER_MESSAGE =
+  "Your last reply was not delivered by the model provider, so none of it was carried out. Reply again.";
+
+const NO_TOOL_CALLS_MESSAGE =
+  "You made no tool calls. Continue by calling tools. When the observation says the task is complete, call done().";
+
+/** An empty value for every placeholder, so any component may reference any documented name. */
+function emptyVars(): Vars {
+  return Object.fromEntries(PROMPT_VARS.map((k) => [k, ""])) as Vars;
 }
 
-/** `pages`: how many pages the task pad shows, one at a time (a slide deck); 1 for an ordinary task. */
-export function systemPrompt(cfg: EnvConfig, memory: MemorySettings, taskImage = false, pages = 1): string {
-  const { sheet, pen, camera } = cfg;
+/** Substitute `{{name}}` from `vars`; an unknown name is an error, so typos surface instead of shipping silently. */
+export function renderPrompt(template: string, vars: Partial<Vars>, where = "prompt"): string {
+  return template.replace(/\{\{\s*([A-Za-z0-9_]+)\s*\}\}/g, (whole, key: string) => {
+    if (!(key in vars)) {
+      throw new Error(`${where}: unknown prompt placeholder ${whole}; known names: ${PROMPT_VARS.join(", ")}`);
+    }
+    return vars[key as PromptVar] ?? "";
+  });
+}
+
+function pick(name: PromptComponent, overrides: PromptOverrides, vars: Partial<Vars>, fallback: () => string): string {
+  const t = overrides[name];
+  return t === undefined ? fallback() : renderPrompt(t, vars, name);
+}
+
+/**
+ * The values every prompt file may interpolate. Sections that are not applicable to this run are empty.
+ */
+export function promptVars(cfg: EnvConfig, memory: MemorySettings, taskImage = false, pages = 1): Vars {
+  const { sheet, pen } = cfg;
   const lines = ruledLines(cfg);
   const ruling = lines.length
     ? `The sheet is ruled: printed lines at y = ${lines[0]}, ${lines[1]}, ... ${lines[lines.length - 1]} mm (every ${sheet.rulingMm} mm)${
@@ -23,14 +153,10 @@ export function systemPrompt(cfg: EnvConfig, memory: MemorySettings, taskImage =
       }. Put letter baselines on the ruled lines.`
     : "The sheet is blank, with no ruling.";
 
-  // The pen dial (src/pen.ts). The same words at every level: the one rule every cam follows, never how many cams.
-  const penWorld = cfg.pen.level !== null;
-  // A pad recorded by the plain pen (--pad-pen 0) holds positions, not pen inputs, and the prompt says so.
-  const plainPad = penWorld && cfg.pen.padLevel === 0;
+  const penWorld = pen.level !== null;
+  const plainPad = penWorld && pen.padLevel === 0;
   const camCount = "How many cams the pen has is not told to you, and it never changes. To read the pad and to write, you have to find it out and work through the cams.";
-  // --no-cam-rule (cfg.pen.noCamRule): the cam rule, zig and the cam count are left out. The prompt then says nothing
-  // about how the machinery works or how to work it: that comes from --policy, which may give the rule or a method.
-  const camRule = cfg.pen.noCamRule
+  const camRule = pen.noCamRule
     ? "- The machinery never changes."
     : `- How the cams work: start from x = u, y = v and take the cams in order. The 1st, 3rd, 5th, ... cam adds zig(y) to x. The 2nd, 4th, 6th, ... cam adds zig(x) to y. Each uses x or y as it stands when its turn comes. After the last cam, (x, y) is where the tip is, in mm.
 - zig(t): let r be t mod 16, so 0 <= r < 16. Then zig(t) = r / 2 if r < 4; 4 - r / 2 if r < 12; r / 2 - 8 otherwise.
@@ -42,45 +168,94 @@ ${camRule}
 - Positions on the paper are in the page frame: tip_mm, the ruled lines, task_line.target${cfg.pageStrokes ? " and page_strokes" : ""} say where the tip or the ink is, or should be, in page mm. pen_inputs in the observation is the last pair of inputs you sent, and the result of every stroke, move_to and move_by reports tip_mm, where the tip ended up.
 `
     : "";
-  const acting = penWorld
-    ? `- stroke(points) is the basic primitive: it lifts, goes to the first point, lowers, takes both inputs steadily to each next point and lifts again.`
-    : `- stroke(points) is the basic primitive: it lifts, travels to the first point, lowers, traces every point and lifts again. Set smooth: true to draw a curve through the points.`;
 
-  return `You control a pen-plotter robot at a desk. The only way you can affect the world is by moving its tool. Text exists only as ink you draw on paper.
+  return {
+    ...emptyVars(),
+    sheet_width_mm: String(sheet.widthMm),
+    sheet_height_mm: String(sheet.heightMm),
+    sheet_ruling_mm: String(sheet.rulingMm),
+    sheet_margin_mm: sheet.marginLineMm === null ? "" : String(sheet.marginLineMm),
+    ruling,
+    pen_width_mm: String(pen.widthMm),
+    pen_eraser_width_mm: String(pen.eraserWidthMm),
+    pen_hover_mm: String(pen.hoverMm),
+    pen_body: penBody,
+    pen_cam_rule: camRule,
+    plain_pad_note: plainPad ? PLAIN_PAD_NOTE : "",
+    eraser_clause: cfg.eraser ? `, or a ${pen.eraserWidthMm} mm eraser after set_tool("eraser"),` : "",
+    no_eraser_sentence: cfg.eraser ? "" : " There is no eraser: ink stays on the paper.",
+    noise_jitter_mm: String(cfg.noise.jitterMm),
+    noise_drift_clause: cfg.noise.driftMmPerM > 0 ? ", plus a slow calibration drift" : "",
+    text_right_mm: String(sheet.widthMm - 15),
+    max_calls_per_turn: String(cfg.maxCallsPerTurn),
+    pages: String(pages),
+    task_kind: cfg.taskKind,
+    policy: cfg.agentPolicy ?? "",
+    memory_advice: memoryAdvice(cfg, memory),
+  };
+}
 
-BODY AND FRAME
-- A gantry carries a pen that draws a ${pen.widthMm} mm line${cfg.eraser ? `, or a ${pen.eraserWidthMm} mm eraser after set_tool("eraser"),` : ""} over an A4 sheet (${sheet.widthMm} x ${sheet.heightMm} mm).${cfg.eraser ? "" : " There is no eraser: ink stays on the paper."}
-${penBody}- Page frame, millimetres: origin at the top-left corner of the sheet, +x to the right (the writing direction), +y down the page, +z up off the paper.${cfg.images ? " Image axes match: u grows right, v grows down." : ""}
-- z = 0 is the paper surface. The tool marks the paper only while z <= 0. Between strokes it hovers at z = ${pen.hoverMm}.
-- ${ruling}
-- Motion is slightly imprecise (about ${cfg.noise.jitterMm} mm per point${cfg.noise.driftMmPerM > 0 ? ", plus a slow calibration drift" : ""}). tip_mm in the observation is where the robot believes the tip is${cfg.images ? "; the images show where it really is" : ""}.
+function bodyBlock(cfg: EnvConfig, v: Vars): string {
+  return `BODY AND FRAME
+- A gantry carries a pen that draws a ${cfg.pen.widthMm} mm line${v.eraser_clause} over an A4 sheet (${cfg.sheet.widthMm} x ${cfg.sheet.heightMm} mm).${v.no_eraser_sentence}
+${v.pen_body}- Page frame, millimetres: origin at the top-left corner of the sheet, +x to the right (the writing direction), +y down the page, +z up off the paper.${cfg.images ? " Image axes match: u grows right, v grows down." : ""}
+- z = 0 is the paper surface. The tool marks the paper only while z <= 0. Between strokes it hovers at z = ${cfg.pen.hoverMm}.
+- ${v.ruling}
+- Motion is slightly imprecise (about ${cfg.noise.jitterMm} mm per point${v.noise_drift_clause}). tip_mm in the observation is where the robot believes the tip is${cfg.images ? "; the images show where it really is" : ""}.`;
+}
 
-YOUR TASK
-${padSection(taskImage, cfg.taskKind === "scan", penWorld && !plainPad)}${plainPad ? "\n- The pad was not written with your pen. Its recording is plain positions on the pad, with no cams involved: read it as it is." : ""}
-${pages > 1 ? `${slidesSection(pages)}\n` : ""}${taskSection(cfg)}
-${policySection(cfg)}
-HARD RULES
-- Your reply is tool calls whose arguments are numbers. Never put words anywhere in your reply: text exists only as ink on the paper.
-${writingSection(cfg)}
-PERCEPTION, EVERY TURN
-${perceptionSection(cfg)}
-ACTING
+function actingBlock(cfg: EnvConfig, v: Vars): string {
+  const acting =
+    cfg.pen.level !== null
+      ? "- stroke(points) is the basic primitive: it lifts, goes to the first point, lowers, takes both inputs steadily to each next point and lifts again."
+      : "- stroke(points) is the basic primitive: it lifts, travels to the first point, lowers, traces every point and lifts. Set smooth: true to draw a curve through the points.";
+  return `ACTING
 - Reply with up to ${cfg.maxCallsPerTurn} tool calls per turn. They run in order. A call that returns status "error" cancels the rest of that turn. Then you get a new observation.
 ${acting}
-- Capitals about 5 mm tall fit the ruling and leave room for descenders. Keep text between the margin line and about x = ${sheet.widthMm - 15}.
-- ${memoryAdvice(cfg, memory)}
-`;
+- Capitals about 5 mm tall fit the ruling and leave room for descenders. Keep text between the margin line and about x = ${cfg.sheet.widthMm - 15}.
+- ${v.memory_advice}`;
+}
+
+function policySection(cfg: EnvConfig): string {
+  return cfg.agentPolicy ? `OPERATING POLICY\n- ${cfg.agentPolicy}` : "";
+}
+
+/** `pages`: how many pages the task pad shows, one at a time (a slide deck); 1 for an ordinary task. */
+export function systemPrompt(cfg: EnvConfig, memory: MemorySettings, taskImage = false, pages = 1, overrides: PromptOverrides = {}): string {
+  const v = promptVars(cfg, memory, taskImage, pages);
+  const penWorld = cfg.pen.level !== null;
+  const plainPad = penWorld && cfg.pen.padLevel === 0;
+
+  const taskPad = pick("system.task_pad", overrides, v, () => padSection(taskImage, cfg.taskKind === "scan", penWorld && !plainPad));
+  const taskPlainPad = plainPad ? pick("system.task_plain_pad", overrides, v, () => PLAIN_PAD_NOTE) : "";
+  const taskSlides = pages > 1 ? pick("system.task_slides", overrides, v, () => slidesSection(pages)) : "";
+  const taskInstructions = pick("system.task_instructions", overrides, v, () => taskSection(cfg));
+  const taskPolicy = pick("system.task_policy", overrides, v, () => policySection(cfg));
+  const taskVars = { ...v, task_pad: taskPad, task_plain_pad: taskPlainPad, task_slides: taskSlides, task_instructions: taskInstructions, task_policy: taskPolicy };
+  const task = pick("system.task", overrides, taskVars, () =>
+    `YOUR TASK\n${[taskPad, taskPlainPad, taskSlides, taskInstructions, taskPolicy].filter(Boolean).join("\n")}`,
+  );
+
+  const intro = pick("system.intro", overrides, v, () => INTRO);
+  const body = pick("system.body", overrides, v, () => bodyBlock(cfg, v));
+  const hardRules = pick("system.hard_rules", overrides, v, () => HARD_RULES);
+  const writing = pick("system.writing", overrides, v, () => writingSection(cfg));
+  const perception = pick("system.perception", overrides, v, () => `PERCEPTION, EVERY TURN\n${perceptionSection(cfg)}`);
+  const acting = pick("system.acting", overrides, v, () => actingBlock(cfg, v));
+
+  const sections = { ...v, ...taskVars, intro, body, task, hard_rules: hardRules, writing, perception, acting };
+  if (overrides.system !== undefined) return renderPrompt(overrides.system, sections, "system");
+  return renderPrompt(SYSTEM_LAYOUT, sections, "system");
 }
 
 function padSection(taskImage: boolean, scan = false, penWorld = false): string {
   const who = scan
     ? "- Scanned documents reach you through a task pad, a digitizer tablet beside the desk: each page is one handwritten document, and different pages may come from different people. You never get their writing as words: you get their pen strokes, and you work out the letters from the strokes."
     : "- A person wrote by hand on a task pad, a digitizer tablet beside the desk. You never get their writing as words: you get their pen strokes, and you work out the letters from the strokes.";
-  const strokes =
-    penWorld
-      ? `${who}
+  const strokes = penWorld
+    ? `${who}
 - The first message holds the whole recording, split into its written lines. Each line has its number, its baseline on the pad (pad_baseline_y_mm, where the ink sits on the pad, in pad mm) and its strokes. The pad was written with a pen like yours, the same machinery working in the pad's own frame (origin at the pad's top-left corner, +x right, +y down), and the recording is that pen's inputs: each stroke is the pairs [u, v] the pen went through while its tip touched the pad. Strokes are listed in the order they were written. A one-point stroke is a dot. On the pad, capitals are about 5 mm tall.`
-      : `${who}
+    : `${who}
 - The first message holds the whole recording, split into its written lines. Each line has its number, its baseline on the pad (pad_baseline_y_mm) and its strokes, in pad millimetres: origin at the top-left corner of the pad, +x right, +y down. Strokes are listed in the order they were written; each is the path of the pen tip while it touched the pad, as [[x, y], ...]. A one-point or tiny closed stroke is a dot. Capitals are about 5 mm tall.`;
   if (!taskImage) return strokes;
   return `${strokes}
@@ -195,37 +370,66 @@ function memoryAdvice(cfg: EnvConfig, m: MemorySettings): string {
 }
 
 /** The opening user message. It never contains the task as text: what follows is pen strokes, and maybe a picture. */
-export function startMessage(cfg: EnvConfig, taskImage = false): string {
+export function startMessage(cfg: EnvConfig, taskImage = false, overrides: PromptOverrides = {}): string {
   const first = cfg.taskKind !== "copy" ? "its task_line says where the first line of your answer goes" : "its task_line names the line to write first";
   const picture = taskImage ? " Then a picture of the second page of your task." : "";
   const what = cfg.taskKind === "scan" ? "every written line of the first document" : "every written line of your task";
-  return `Begin. The task pad recording follows: ${what} as pen strokes.${picture} Then your first observation; ${first}.`;
+  const v = promptVars(cfg, { keepTurns: 0, maxContextTokens: 500_000 }, taskImage, 1);
+  return pick("user.start", overrides, v, () => `Begin. The task pad recording follows: ${what} as pen strokes.${picture} Then your first observation; ${first}.`);
 }
 
-/** Introduces the recording in the pinned first message. */
-export const RECORDING_HEADER = "Task pad recording (pen strokes, all lines):";
+/** The header that introduces the recording in the pinned first message. */
+export function recordingHeader(overrides: PromptOverrides = {}): string {
+  return pick("user.recording_header", overrides, emptyVars(), () => RECORDING_HEADER);
+}
 
 /** Introduces the recording of a page the operator turned to (slides). */
-export function pageTurnHeader(page: number, pages: number): string {
+export function pageTurnHeader(page: number, pages: number, overrides: PromptOverrides = {}): string {
+  const v = { ...emptyVars(), page: String(page), page_count: String(pages) };
   // Neutral on purpose: says which page is on the pad now, nothing about whether earlier pages still apply.
-  return `The page was turned: page ${page} of ${pages} is now on the pad, as a pen-stroke recording in the same format as the first. task_line now refers to this page.`;
+  return pick("user.page_turn", overrides, v, () => `The page was turned: page ${page} of ${pages} is now on the pad, as a pen-stroke recording in the same format as the first. task_line now refers to this page.`);
 }
 
 /** Introduces the picture of the second handwritten page in the pinned first message. */
-export const TASK_IMAGE_HEADER = "Second page of the task (picture):";
+export function taskImageHeader(overrides: PromptOverrides = {}): string {
+  return pick("user.task_image_header", overrides, emptyVars(), () => TASK_IMAGE_HEADER);
+}
+
+/** The text before an observation JSON in a user message. */
+export function observationPrefix(turn: number, overrides: PromptOverrides = {}): string {
+  const v = { ...emptyVars(), turn: String(turn) };
+  return pick("user.observation_prefix", overrides, v, () => `Observation after turn ${turn}:\n`);
+}
+
+/** The label before a camera image in a user message. */
+export function imageLabel(name: string, overrides: PromptOverrides = {}): string {
+  const v = { ...emptyVars(), image_name: name };
+  return pick("user.image_label", overrides, v, () => `${name} image:`);
+}
+
+/** The placeholder left where an older turn's image was dropped. */
+export function imageOmittedLabel(name: string, overrides: PromptOverrides = {}): string {
+  const v = { ...emptyVars(), image_name: name };
+  return pick("user.image_omitted", overrides, v, () => `[${name} image omitted from older observation]`);
+}
 
 /** Added to a request sent again after the provider did not deliver the model's reply. */
-export const BLOCKED_MESSAGE =
-  "Your last reply was not delivered by the model provider, so none of it was carried out. This turn task_line.stroke_range covers only a part of the line; write just that part.";
+export function blockedMessage(overrides: PromptOverrides = {}): string {
+  return pick("user.blocked", overrides, emptyVars(), () => BLOCKED_MESSAGE);
+}
 
-/**
- * The same, when there is no pad line to narrow (instruct tasks). Neutral on purpose: it asks for nothing different,
- * so a run of provider blocks cannot steer what the agent writes (an earlier "write a shorter line" did).
- */
-export const BLOCKED_SHORTER_MESSAGE =
-  "Your last reply was not delivered by the model provider, so none of it was carried out. Reply again.";
+/** The same, when there is no pad line to narrow (instruct tasks). */
+export function blockedShorterMessage(overrides: PromptOverrides = {}): string {
+  return pick("user.blocked_shorter", overrides, emptyVars(), () => BLOCKED_SHORTER_MESSAGE);
+}
+
+/** Sent when a reply carried no tool calls. */
+export function noToolCallsMessage(overrides: PromptOverrides = {}): string {
+  return pick("user.no_tool_calls", overrides, emptyVars(), () => NO_TOOL_CALLS_MESSAGE);
+}
 
 /** Follows the recording once early turns have been dropped from the conversation. */
-export function droppedTurnsMessage(dropped: number): string {
-  return `Continue your task. ${dropped} earlier turns were dropped from this conversation. The latest observation holds the current task line and where your writing is on the paper.`;
+export function droppedTurnsMessage(dropped: number, overrides: PromptOverrides = {}): string {
+  const v = { ...emptyVars(), dropped: String(dropped) };
+  return pick("user.dropped_turns", overrides, v, () => `Continue your task. ${dropped} earlier turns were dropped from this conversation. The latest observation holds the current task line and where your writing is on the paper.`);
 }

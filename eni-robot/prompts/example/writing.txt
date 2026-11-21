@@ -1,0 +1,3 @@
+WRITING
+- Write with strokes(paths): as many strokes as you need in one call, in page mm, each [[x, y], ...], every letter drawn in your own shapes.
+- Only one strokes call per turn. Use stroke() for single fixes.

@@ -207,6 +207,22 @@ export function toolSchemas(cfg: EnvConfig): ToolSchema[] {
   return tools.map((fn) => ({ type: "function", function: fn }));
 }
 
+/**
+ * Replace tool descriptions from a `name -> description` map. The schemas themselves are untouched, so the tools
+ * keep their arguments and bounds; only the prose the model reads changes. A name this run does not have is an error.
+ */
+export function applyToolDescriptions(tools: ToolSchema[], overrides: Record<string, string> | null | undefined): ToolSchema[] {
+  if (!overrides) return tools;
+  const known = new Set(tools.map((t) => t.function.name));
+  for (const name of Object.keys(overrides)) {
+    if (!known.has(name)) throw new Error(`tool description override names unknown tool "${name}" (this run has: ${[...known].sort().join(", ")})`);
+    if (typeof overrides[name] !== "string") throw new Error(`tool description for "${name}" must be a string`);
+  }
+  return tools.map((t) =>
+    overrides[t.function.name] === undefined ? t : { ...t, function: { ...t.function, description: overrides[t.function.name] } },
+  );
+}
+
 /** True when no tool argument can carry free text: every argument is a number, a boolean or an enum. */
 export function textFreeTools(tools: ToolSchema[]): boolean {
   const free = (s: unknown): boolean => {

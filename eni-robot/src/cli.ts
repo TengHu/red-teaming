@@ -7,17 +7,14 @@ import { REASONING_EFFORTS, runArgon, turnOnDone, type ArgonOptions, type PageTu
 import { runScripted } from "./agents/scripted.ts";
 import { ACTION_MODES, resolveConfig, TASK_KINDS, type ActionMode, type ConfigOverrides, type EnvConfig, type TaskKind } from "./config.ts";
 import { ScribeEnv, splitDeck, type EnvEvent } from "./env.ts";
+import { PROMPT_COMPONENTS, PROMPT_VARS, systemPrompt, type PromptComponent, type PromptOverrides } from "./prompt.ts";
 import { renderSheet } from "./ink.ts";
 import { BACKENDS, createClient, type AttemptLog, type Backend } from "./clients/index.ts";
 import { startViewer, type Viewer } from "./server.ts";
 import { padRecording, type TaskPad } from "./taskpad.ts";
+import type { ToolSchema } from "./actions.ts";
 
 const PKG_ROOT = path.resolve(import.meta.dirname, "..");
-const DEFAULT_TASK: Record<TaskKind, string> = {
-  instruct: "Write a short joke about robots.",
-  copy: "A robot that writes by hand must plan every stroke of every letter,\nthen look at the page to see what the pen really drew.",
-  scan: "Cleaner's note: towels restocked, dishwasher salt low.",
-};
 
 const USAGE = `Usage: node src/cli.ts <command> [options]
 
@@ -25,6 +22,7 @@ Commands
   argon       Let a model (--model, required) write by hand
   scripted    Write text with the built-in reference writer (no model, no API key)
   view <dir>  Replay a saved run in the 3D viewer
+  prompts     List every prompt component and placeholder (also --list-prompt-components)
 
 Episode options
   --task "..." | --task-file f   argon: what is handwritten on the task pad; the model gets its whole pen recording once, then writes its answer
@@ -39,6 +37,17 @@ Episode options
   --task-kind instruct|copy|scan instruct (default): the pad holds a request, and the model writes its own answer; copy: the model writes out the pad's text;
                                  scan: each pad page is a scanned document, possibly from a different writer, and the job comes from --policy (required)
   --policy "TEXT"                a standing operating policy for the scribe, added to the system prompt (e.g. how to handle the pad's request)
+  --policy-file f                read the operating policy from a file instead (same as --policy "$(cat f)")
+  --system-prompt "TEXT"         replace the whole system prompt with the text itself (placeholders still render)
+  --system-prompt-file f         replace the whole system prompt with the contents of a file (same as --system-prompt "$(cat f)")
+  --task-prompt "TEXT"           replace just the YOUR TASK section with the text itself
+  --task-prompt-file f           replace just the YOUR TASK section with the contents of a file
+  --prompt NAME=PATH             replace any other component (repeatable), e.g. --prompt system.writing=writing.txt;
+                                 run the prompts command for every component name and placeholder
+  --print-system-prompt          print the system prompt these flags produce, then exit (no model call)
+  --tool-descriptions f          JSON object of tool name -> description; the tool schemas stay exactly as they are
+  --tools-file f                 JSON array of OpenAI-style tools; replaces the whole tool set sent to the model
+  --list-prompt-components       print every prompt component and placeholder, then exit
   --no-eraser                    remove the eraser from the tool set (the agent cannot erase its own writing)
   --text "..." | --text-file f   scripted: the exact text to write
   --mode glyphs|strokes|primitives|code   action mode (default strokes); every mode but code has number-only tools
@@ -77,51 +86,76 @@ Scripted options
   --cap-mm MM                    capital height (default 6)
 `;
 
+/** The two common overrides have their own flags; anything else goes through --prompt NAME=PATH. */
+const PROMPT_HELP = `Prompt files: --system-prompt-file f replaces the whole system prompt, --task-prompt-file f just the
+YOUR TASK section. For any other component use --prompt NAME=PATH, e.g. --prompt system.writing=writing.txt.
+Run the prompts command for every component name and placeholder.`;
+
+const OPTIONS = {
+  task: { type: "string" },
+  "task-file": { type: "string" },
+  slides: { type: "string" },
+  text: { type: "string" },
+  "text-file": { type: "string" },
+  mode: { type: "string" },
+  "task-kind": { type: "string" },
+  policy: { type: "string" },
+  "policy-file": { type: "string" },
+  "system-prompt": { type: "string" },
+  "system-prompt-file": { type: "string" },
+  "task-prompt": { type: "string" },
+  "task-prompt-file": { type: "string" },
+  "print-system-prompt": { type: "boolean", default: false },
+  prompt: { type: "string", multiple: true },
+  "tool-descriptions": { type: "string" },
+  "tools-file": { type: "string" },
+  "list-prompt-components": { type: "boolean", default: false },
+  "no-eraser": { type: "boolean", default: false },
+  pen: { type: "string" },
+  "pad-pen": { type: "string" },
+  "no-cam-rule": { type: "boolean", default: false },
+  unwind: { type: "boolean", default: false },
+  "max-turns": { type: "string" },
+  noise: { type: "string" },
+  drift: { type: "string" },
+  seed: { type: "string" },
+  config: { type: "string" },
+  view: { type: "boolean", default: false },
+  port: { type: "string", default: "4321" },
+  "runs-dir": { type: "string" },
+  "save-obs": { type: "boolean", default: false },
+  "page-image": { type: "boolean", default: false },
+  "page-strokes": { type: "boolean", default: false },
+  "turn-on-done": { type: "boolean", default: false },
+  "task-image-file": { type: "string" },
+  model: { type: "string" },
+  effort: { type: "string", default: "low" },
+  "keep-turns": { type: "string", default: "0" },
+  "max-context-tokens": { type: "string", default: "500000" },
+  "max-cost": { type: "string" },
+  "max-tokens": { type: "string", default: "16384" },
+  provider: { type: "string" },
+  backend: { type: "string", default: "openrouter" },
+  "cap-mm": { type: "string", default: "6" },
+  help: { type: "boolean", short: "h", default: false },
+} as const;
+
 async function main(): Promise<void> {
   const [command, ...rest] = process.argv.slice(2);
   const { values, positionals } = parseArgs({
     args: rest,
     allowPositionals: true,
-    options: {
-      task: { type: "string" },
-      "task-file": { type: "string" },
-      slides: { type: "string" },
-      text: { type: "string" },
-      "text-file": { type: "string" },
-      mode: { type: "string" },
-      "task-kind": { type: "string" },
-      policy: { type: "string" },
-      "no-eraser": { type: "boolean", default: false },
-      pen: { type: "string" },
-      "pad-pen": { type: "string" },
-      "no-cam-rule": { type: "boolean", default: false },
-      unwind: { type: "boolean", default: false },
-      "max-turns": { type: "string" },
-      noise: { type: "string" },
-      drift: { type: "string" },
-      seed: { type: "string" },
-      config: { type: "string" },
-      view: { type: "boolean", default: false },
-      port: { type: "string", default: "4321" },
-      "runs-dir": { type: "string" },
-      "save-obs": { type: "boolean", default: false },
-      "page-image": { type: "boolean", default: false },
-      "page-strokes": { type: "boolean", default: false },
-      "turn-on-done": { type: "boolean", default: false },
-      "task-image-file": { type: "string" },
-      model: { type: "string" },
-      effort: { type: "string", default: "low" },
-      "keep-turns": { type: "string", default: "0" },
-      "max-context-tokens": { type: "string", default: "500000" },
-      "max-cost": { type: "string" },
-      "max-tokens": { type: "string", default: "16384" },
-      provider: { type: "string" },
-      backend: { type: "string", default: "openrouter" },
-      "cap-mm": { type: "string", default: "6" },
-      help: { type: "boolean", short: "h", default: false },
-    },
+    options: OPTIONS,
   });
-  if (values.help || !command) return void console.log(USAGE);
+  if (command === "prompts" || command === "--list-prompt-components" || values["list-prompt-components"]) {
+    console.log("Prompt components (--system-prompt, --task-prompt, --system-prompt-file, --task-prompt-file, or --prompt NAME=PATH):\n  " + PROMPT_COMPONENTS.join("\n  "));
+    console.log("\nPlaceholders a prompt file may use:\n  " + PROMPT_VARS.join("\n  "));
+    return;
+  }
+  if (values.help || !command || command === "--help" || command === "help") {
+    console.log(`${USAGE}\n${PROMPT_HELP}`);
+    return;
+  }
   loadDotEnv();
 
   if (command === "view") {
@@ -142,8 +176,12 @@ async function main(): Promise<void> {
   if (values["task-kind"]) {
     if (!TASK_KINDS.includes(values["task-kind"] as TaskKind)) throw new Error(`--task-kind must be one of ${TASK_KINDS.join(", ")}`);
     overrides.taskKind = values["task-kind"] as TaskKind;
-    if (overrides.taskKind === "scan" && !values.policy) throw new Error("--task-kind scan needs --policy: the job comes from the operating policy, never from the pad");
+    if (overrides.taskKind === "scan" && !values.policy && !values["policy-file"]) {
+      throw new Error("--task-kind scan needs --policy or --policy-file: the job comes from the operating policy, never from the pad");
+    }
   }
+  if (values.policy && values["policy-file"]) throw new Error("use --policy or --policy-file, not both");
+  if (values["policy-file"]) overrides.agentPolicy = readFileSync(path.resolve(values["policy-file"]), "utf8").trim();
   if (values.policy) overrides.agentPolicy = values.policy;
   if (values["no-eraser"]) overrides.eraser = false;
   if (values.pen !== undefined) overrides.pen = { ...overrides.pen, level: Number(values.pen) };
@@ -167,16 +205,9 @@ async function main(): Promise<void> {
     if (values.drift) overrides.noise.driftMmPerM = Number(values.drift);
   }
   const cfg = resolveConfig(overrides);
-
-  const backend = values.backend as Backend;
-  if (!BACKENDS.includes(backend)) throw new Error(`--backend must be one of ${BACKENDS.join(", ")}`);
-  if (values.provider && backend !== "openrouter") throw new Error("--provider pins an OpenRouter provider; it does not apply to --backend " + backend);
-  // OpenRouter takes GATEWAY_API_KEY (the OpenRouter key); Google's Gemini API takes GEMINI_API_KEY. Both in the repo's .env.
-  const keyName = backend === "gemini" ? "GEMINI_API_KEY" : "GATEWAY_API_KEY";
-  const apiKey = process.env[keyName];
-  const client = apiKey ? createClient(backend, apiKey) : null;
-  if (command === "argon" && !values.model) throw new Error("argon needs --model <id>, e.g. --model google/gemini-4-argon");
-  if (command === "argon" && !client) throw new Error(`${keyName} is not set (put it in the repo's .env)`);
+  const { overrides: promptOverrides, files: promptFiles } = loadPromptOverrides(values as Record<string, unknown>);
+  const toolDescriptions = loadToolDescriptions(values["tool-descriptions"]);
+  const tools = loadTools(values["tools-file"]);
 
   if (values.slides && command !== "argon") throw new Error("--slides is for argon");
   if (values["turn-on-done"] && !values.slides) throw new Error("--turn-on-done needs --slides");
@@ -188,16 +219,40 @@ async function main(): Promise<void> {
   const rawSections = new Set(deck ? deck.parts.flat().filter((p) => p.raw).map((p) => p.section) : []);
   // Copy tasks feed the pad's drawn rows one by one; a raw row has no strokes to copy.
   if (rawSections.size && cfg.taskKind === "copy") throw new Error("raw ([raw]) deck sections work in instruct and scan tasks, not copy");
+  const imageFile = values["task-image-file"] ?? path.join(PKG_ROOT, "tasks", "task-image.txt");
+  const imageTask = command === "argon" && !pages && existsSync(imageFile) ? readFileSync(imageFile, "utf8").trim() : "";
+  // Print the exact system message for these flags and stop: no run directory, no request.
+  if (values["print-system-prompt"]) {
+    process.stdout.write(
+      systemPrompt(
+        cfg,
+        { keepTurns: Number(values["keep-turns"]), maxContextTokens: Number(values["max-context-tokens"]) },
+        Boolean(imageTask),
+        Math.max(1, pages?.length ?? 1),
+        promptOverrides,
+      ),
+    );
+    return;
+  }
+
+  const backend = values.backend as Backend;
+  if (!BACKENDS.includes(backend)) throw new Error(`--backend must be one of ${BACKENDS.join(", ")}`);
+  if (values.provider && backend !== "openrouter") throw new Error("--provider pins an OpenRouter provider; it does not apply to --backend " + backend);
+  // OpenRouter takes GATEWAY_API_KEY (the OpenRouter key); Google's Gemini API takes GEMINI_API_KEY. Both in the repo's .env.
+  const keyName = backend === "gemini" ? "GEMINI_API_KEY" : "GATEWAY_API_KEY";
+  const apiKey = process.env[keyName];
+  const client = apiKey ? createClient(backend, apiKey) : null;
+  if (command === "argon" && !values.model) throw new Error("argon needs --model <id>, e.g. --model google/gemini-4-argon");
+  if (command === "argon" && !client) throw new Error(`${keyName} is not set (put it in the repo's .env)`);
+
+  if (!REASONING_EFFORTS.includes(values.effort as ReasoningEffort)) throw new Error(`--effort must be one of ${REASONING_EFFORTS.join(", ")}`);
   const prompt = pages
     ? pages[0]
     : command === "argon"
-      ? (values["task-file"] ? readFileSync(values["task-file"], "utf8") : values.task ?? DEFAULT_TASK[cfg.taskKind]).trim()
+      ? (values["task-file"] ? readFileSync(values["task-file"], "utf8") : values.task ?? "").trim()
       : (values["text-file"] ? readFileSync(values["text-file"], "utf8") : values.text ?? "").trim();
-  const imageFile = values["task-image-file"] ?? path.join(PKG_ROOT, "tasks", "task-image.txt");
-  const imageTask = command === "argon" && !pages && existsSync(imageFile) ? readFileSync(imageFile, "utf8").trim() : "";
   if (!prompt && !imageTask) throw new Error(command === "argon" ? "the task is empty" : "scripted needs --text or --text-file");
   const runDir = makeRunDir(values["runs-dir"] ? path.resolve(values["runs-dir"]) : path.join(PKG_ROOT, "runs"), command);
-  if (!REASONING_EFFORTS.includes(values.effort as ReasoningEffort)) throw new Error(`--effort must be one of ${REASONING_EFFORTS.join(", ")}`);
   const title = command === "argon" ? `${values.model}${values.backend !== "openrouter" ? ` (${values.backend})` : ""} · effort ${values.effort} · ${cfg.taskKind} · ${cfg.actionMode} mode${cfg.notes ? " · notes" : ""}${cfg.images ? " · images" : ""}${cfg.pageImage ? " · page image" : ""}${cfg.pageStrokes ? " · page strokes" : ""}${cfg.pen.level !== null ? ` · pen ${cfg.pen.level}` : ""}${cfg.pen.padLevel !== null ? ` · pad pen ${cfg.pen.padLevel}` : ""}${cfg.agentPolicy ? " · policy" : ""}${imageTask ? " · task image" : ""}${pages ? ` · slides ${pages.length} pages${sectionCount > pages.length ? `, ${sectionCount} sections` : ""}` : ""}` : "scripted reference writer";
   // The task is handwritten: the model receives the task pad's pen strokes, plus a picture of the second page if there is one.
   const env = await ScribeEnv.create(cfg, pages ? { pages, parts: deck!.parts } : { task: prompt, imageTask });
@@ -219,6 +274,10 @@ async function main(): Promise<void> {
     provider: command === "argon" ? values.provider ?? null : null,
     started: new Date().toISOString(),
     config: cfg,
+    ...(Object.keys(promptFiles).length ? { prompt_files: promptFiles } : {}),
+    ...(values["policy-file"] ? { policy_file: path.resolve(values["policy-file"]) } : {}),
+    ...(values["tool-descriptions"] ? { tool_descriptions_file: path.resolve(values["tool-descriptions"]) } : {}),
+    ...(values["tools-file"] ? { tools_file: path.resolve(values["tools-file"]) } : {}),
   };
   writeJson(path.join(runDir, "run.json"), meta);
 
@@ -272,6 +331,9 @@ async function main(): Promise<void> {
     if (pageTurns) console.log(`slides: page 1 of ${pages!.length}; ${auto ? "the page turns when the model finishes it" : "press Enter to turn the page"}`);
     const opts: ArgonOptions = {
       ...(pageTurns ? { pageTurns } : {}),
+      ...(Object.keys(promptOverrides).length ? { prompts: promptOverrides } : {}),
+      ...(toolDescriptions ? { toolDescriptions } : {}),
+      ...(tools ? { tools } : {}),
       model: values.model!,
       reasoningEffort: values.effort as ReasoningEffort,
       keepTurns: Number(values["keep-turns"]),
@@ -394,6 +456,78 @@ async function replay(runDir: string, port: number): Promise<void> {
   }
   viewer.broadcast({ t: "status", text: `replay: ${meta.stop_reason ?? "unfinished"}`, error: meta.error });
   console.log(`replaying ${runDir} at ${viewer.url} (Ctrl-C to quit)`);
+}
+
+/**
+ * Load prompt components: --system-prompt-file replaces the whole system prompt, --task-prompt-file
+ * just the task section, and --prompt NAME=PATH (repeatable) any other component. --prompt is applied last.
+ */
+function loadPromptOverrides(values: Record<string, unknown>): {
+  overrides: PromptOverrides;
+  files: Partial<Record<PromptComponent, string>>;
+} {
+  const overrides: PromptOverrides = {};
+  const files: Partial<Record<PromptComponent, string>> = {};
+  const set = (name: string, file: string): void => {
+    if (!(PROMPT_COMPONENTS as readonly string[]).includes(name)) {
+      throw new Error(`unknown prompt component "${name}"; run the prompts command for the full list`);
+    }
+    const resolved = path.resolve(file);
+    overrides[name as PromptComponent] = readFileSync(resolved, "utf8");
+    files[name as PromptComponent] = resolved;
+  };
+
+  if (typeof values["system-prompt"] === "string" && typeof values["system-prompt-file"] === "string") {
+    throw new Error("use --system-prompt or --system-prompt-file, not both");
+  }
+  if (typeof values["task-prompt"] === "string" && typeof values["task-prompt-file"] === "string") {
+    throw new Error("use --task-prompt or --task-prompt-file, not both");
+  }
+  if (typeof values["system-prompt"] === "string") overrides.system = values["system-prompt"];
+  if (typeof values["system-prompt-file"] === "string") set("system", values["system-prompt-file"]);
+  if (typeof values["task-prompt"] === "string") overrides["system.task"] = values["task-prompt"];
+  if (typeof values["task-prompt-file"] === "string") set("system.task", values["task-prompt-file"]);
+  for (const spec of (values.prompt as string[] | undefined) ?? []) {
+    const at = spec.indexOf("=");
+    if (at < 0) throw new Error(`--prompt needs NAME=PATH, got "${spec}"`);
+    set(spec.slice(0, at).trim(), spec.slice(at + 1).trim());
+  }
+
+  return { overrides, files };
+}
+
+/** A JSON object of tool name -> description. The schemas themselves are not touched. */
+function loadToolDescriptions(file: string | undefined): Record<string, string> | null {
+  if (!file) return null;
+  const parsed: unknown = JSON.parse(readFileSync(path.resolve(file), "utf8"));
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw new Error("--tool-descriptions needs a JSON object of tool name -> description");
+  }
+  for (const [name, description] of Object.entries(parsed)) {
+    if (typeof description !== "string") throw new Error(`--tool-descriptions: "${name}" must map to a string`);
+  }
+  return parsed as Record<string, string>;
+}
+
+/**
+ * A complete tool set from a JSON array of OpenAI-style tools. It replaces the environment's own tools, so the
+ * names and arguments the model sees are entirely up to the file; the environment still checks every call it gets.
+ */
+function loadTools(file: string | undefined): ToolSchema[] | null {
+  if (!file) return null;
+  const parsed: unknown = JSON.parse(readFileSync(path.resolve(file), "utf8"));
+  if (!Array.isArray(parsed)) throw new Error("--tools-file needs a JSON array of OpenAI-style tools");
+  const seen = new Set<string>();
+  parsed.forEach((tool, i) => {
+    const t = tool as { type?: unknown; function?: { name?: unknown; description?: unknown; parameters?: unknown } };
+    if (!t || typeof t !== "object" || t.type !== "function") throw new Error(`--tools-file: tool ${i} needs "type": "function"`);
+    if (!t.function || typeof t.function.name !== "string" || !t.function.name) throw new Error(`--tools-file: tool ${i} needs function.name`);
+    if (typeof t.function.description !== "string") throw new Error(`--tools-file: tool "${t.function.name}" needs function.description`);
+    if (!t.function.parameters || typeof t.function.parameters !== "object") throw new Error(`--tools-file: tool "${t.function.name}" needs function.parameters`);
+    if (seen.has(t.function.name)) throw new Error(`--tools-file: duplicate tool name "${t.function.name}"`);
+    seen.add(t.function.name);
+  });
+  return parsed as ToolSchema[];
 }
 
 /** Where the viewer should lay a task pad on the desk, and the strokes written on it. */
